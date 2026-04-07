@@ -1,6 +1,13 @@
-package org.example;
+package org.example.controller;
 
 import lombok.RequiredArgsConstructor;
+import org.example.dto.DeviceRequest;
+import org.example.dto.DeviceResponse;
+import org.example.model.Device;
+import org.example.model.event.Action;
+import org.example.model.event.EventType;
+import org.example.model.event.InitialState;
+import org.example.service.TopologyService;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -19,6 +26,11 @@ public class DeviceController {
     @GetMapping
     public List<Device> getAllDevices() {
         return new ArrayList<>(topologyService.getDevices().values());
+    }
+
+    @GetMapping("/{id}/connections")
+    public Set<Long> getDeviceConnections(@PathVariable Long id) {
+        return topologyService.getConnections().getOrDefault(id, new HashSet<>());
     }
 
     @PatchMapping("/{id}")

@@ -1,8 +1,6 @@
-package org.example;
+package org.example.model.event;
 
 import lombok.Data;
-
-import java.util.Set;
 
 @Data
 public class Action extends Event {

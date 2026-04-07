@@ -1,7 +1,8 @@
-package org.example;
+package org.example.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import org.example.model.Device;
 
 @Data
 @AllArgsConstructor

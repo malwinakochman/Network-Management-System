@@ -1,9 +1,11 @@
-package org.example;
+package org.example.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.Getter;
+import org.example.model.Device;
+import org.example.dto.DeviceRequest;
 import org.springframework.stereotype.Service;
 
 import java.io.File;

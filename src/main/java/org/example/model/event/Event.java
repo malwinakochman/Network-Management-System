@@ -1,4 +1,4 @@
-package org.example;
+package org.example.model.event;
 
 import lombok.Data;
 
