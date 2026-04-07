@@ -6,6 +6,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 @RestController
@@ -13,13 +14,20 @@ import java.util.concurrent.CopyOnWriteArrayList;
 @RequiredArgsConstructor
 public class DeviceController {
     private final TopologyService topologyService;
-    private final Map<Long, List<SseEmitter>> emitters = new HashMap<>();
+    private final Map<Long, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
+
+    @GetMapping
+    public List<Device> getAllDevices() {
+        return new ArrayList<>(topologyService.getDevices().values());
+    }
 
     @PatchMapping("/{id}")
     public DeviceResponse updateDevice(@PathVariable Long id, @RequestBody DeviceRequest request) {
         Map<Long, Set<Long>> beforeState = new HashMap<>();
-        for (Long subscriberId : emitters.keySet()) {
-            beforeState.put(subscriberId, new HashSet<>(topologyService.getReachableDevices(subscriberId)));
+        synchronized (emitters) {
+            for (Long subscriberId : emitters.keySet()) {
+                beforeState.put(subscriberId, new HashSet<>(topologyService.getReachableDevices(subscriberId)));
+            }
         }
         Device device = topologyService.updateDevice(id, request);
         emitReachabilityChanges(beforeState);
@@ -29,7 +37,9 @@ public class DeviceController {
     @GetMapping("/{id}/reachable-devices")
     public SseEmitter streamReachableDevices(@PathVariable Long id) {
         SseEmitter emitter = new SseEmitter(300000L);
-        emitters.computeIfAbsent(id, k -> new CopyOnWriteArrayList<>()).add(emitter);
+        synchronized (emitters) {
+            emitters.computeIfAbsent(id, k -> new CopyOnWriteArrayList<>()).add(emitter);
+        }
 
         Set<Long> initialState = topologyService.getReachableDevices(id);
 
@@ -49,52 +59,56 @@ public class DeviceController {
     }
 
     private void cleanup(SseEmitter emitter, Long id) {
-        List<SseEmitter> list = emitters.get(id);
-        if (list != null) {
-            list.remove(emitter);
-            if (list.isEmpty()) {
-                emitters.remove(id);
+        synchronized (emitters) {
+            List<SseEmitter> list = emitters.get(id);
+            if (list != null) {
+                list.remove(emitter);
+                if (list.isEmpty()) {
+                    emitters.remove(id);
+                }
             }
         }
     }
 
     private void emitReachabilityChanges(Map<Long, Set<Long>> beforeState) {
-        for (Map.Entry<Long, List<SseEmitter>> entry : emitters.entrySet()) {
-            Long subscriberId = entry.getKey();
-            Set<Long> before = beforeState.getOrDefault(subscriberId, new HashSet<>());
-            Set<Long> after = topologyService.getReachableDevices(subscriberId);
-            
-            Set<Long> removed = new HashSet<>(before);
-            removed.removeAll(after);
-            
-            Set<Long> added = new HashSet<>(after);
-            added.removeAll(before);
-            
-            if (removed.isEmpty() && added.isEmpty()) {
-                continue;
-            }
-            
-            List<SseEmitter> emittersList = entry.getValue();
-            for (SseEmitter emitter : emittersList) {
-                for (Long deviceId : removed) {
-                    try {
-                        Action event = new Action();
-                        event.setType(EventType.REMOVED);
-                        event.setDeviceId(deviceId);
-                        emitter.send(SseEmitter.event().data(event));
-                    } catch (IOException e) {
-                        emitter.completeWithError(e);
-                    }
+        synchronized (emitters) {
+            for (Map.Entry<Long, List<SseEmitter>> entry : emitters.entrySet()) {
+                Long subscriberId = entry.getKey();
+                Set<Long> before = beforeState.getOrDefault(subscriberId, new HashSet<>());
+                Set<Long> after = topologyService.getReachableDevices(subscriberId);
+                
+                Set<Long> removed = new HashSet<>(before);
+                removed.removeAll(after);
+                
+                Set<Long> added = new HashSet<>(after);
+                added.removeAll(before);
+                
+                if (removed.isEmpty() && added.isEmpty()) {
+                    continue;
                 }
                 
-                for (Long deviceId : added) {
-                    try {
-                        Action event = new Action();
-                        event.setType(EventType.ADDED);
-                        event.setDeviceId(deviceId);
-                        emitter.send(SseEmitter.event().data(event));
-                    } catch (IOException e) {
-                        emitter.completeWithError(e);
+                List<SseEmitter> emittersList = entry.getValue();
+                for (SseEmitter emitter : emittersList) {
+                    for (Long deviceId : removed) {
+                        try {
+                            Action event = new Action();
+                            event.setType(EventType.REMOVED);
+                            event.setDeviceId(deviceId);
+                            emitter.send(SseEmitter.event().data(event));
+                        } catch (IOException e) {
+                            emitter.completeWithError(e);
+                        }
+                    }
+                    
+                    for (Long deviceId : added) {
+                        try {
+                            Action event = new Action();
+                            event.setType(EventType.ADDED);
+                            event.setDeviceId(deviceId);
+                            emitter.send(SseEmitter.event().data(event));
+                        } catch (IOException e) {
+                            emitter.completeWithError(e);
+                        }
                     }
                 }
             }
