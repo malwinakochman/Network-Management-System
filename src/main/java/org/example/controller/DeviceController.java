@@ -1,5 +1,9 @@
 package org.example.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.ExampleObject;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import org.example.dto.DeviceRequest;
 import org.example.dto.DeviceResponse;
@@ -23,6 +27,7 @@ public class DeviceController {
     private final TopologyService topologyService;
     private final Map<Long, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
 
+    @Operation(summary = "Update device (name or active status)")
     @PatchMapping("/{id}")
     public DeviceResponse updateDevice(@PathVariable Long id, @RequestBody DeviceRequest request) {
         Map<Long, Set<Long>> beforeState = new HashMap<>();
@@ -36,7 +41,30 @@ public class DeviceController {
         return DeviceResponse.toResponse(device);
     }
 
-    @GetMapping("/{id}/reachable-devices")
+    @Operation(
+            summary = "Stream reachable devices",
+            description = """
+                Stream returning types:
+                - INITIAL_STATE: full list of reachable devices
+                - ADDED: device became reachable
+                - REMOVED: device became unreachable
+                """
+    )
+    @ApiResponse(
+            responseCode = "200",
+            description = "Stream of device updates",
+            content = @Content(
+                    mediaType = "text/event-stream",
+                    examples = @ExampleObject(
+                            value = """
+                        data:{"deviceIds":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19],"type":"INITIAL_STATE"}
+                        data:{"deviceId":9,"type":"REMOVED"}
+                        data:{"deviceId":4,"type":"ADDED"}
+                        """
+                    )
+            )
+    )
+    @GetMapping(path = "/{id}/reachable-devices", produces = "text/event-stream")
     public SseEmitter streamReachableDevices(@PathVariable Long id) {
         SseEmitter emitter = new SseEmitter(300000L);
         synchronized (emitters) {
@@ -72,11 +100,23 @@ public class DeviceController {
         }
     }
 
+    @Operation(summary = "Get all devices")
     @GetMapping
     public List<DeviceResponse> getAllDevices() {
         return new ArrayList<>(topologyService.getDevices());
     }
 
+    @Operation(summary = "Get device connections")
+    @ApiResponse(
+            responseCode = "200",
+            description = "List of devices which are connected",
+            content = @Content(
+                    mediaType = "application/json",
+                    examples = @ExampleObject(
+                            value = "[0,10,12]"
+                    )
+            )
+    )
     @GetMapping("/{id}/connections")
     public Set<Long> getDeviceConnections(@PathVariable Long id) {
         return topologyService.getConnectionsForDevice(id);
