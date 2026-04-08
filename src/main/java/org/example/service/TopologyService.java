@@ -3,7 +3,7 @@ package org.example.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
-import lombok.Getter;
+import org.example.dto.DeviceResponse;
 import org.example.model.Device;
 import org.example.dto.DeviceRequest;
 import org.springframework.stereotype.Service;
@@ -14,7 +14,6 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
-@Getter
 public class TopologyService {
     private Map<Long, Device> devices;
     private Map<Long, Set<Long>> connections;
@@ -73,5 +72,15 @@ public class TopologyService {
             }
         }
         return reachable;
+    }
+
+    public Set<Long> getConnectionsForDevice(Long id) {
+        return new HashSet<>(connections.getOrDefault(id, Collections.emptySet()));
+    }
+
+    public List<DeviceResponse> getDevices() {
+        return devices.values().stream()
+                .map(DeviceResponse::toResponse)
+                .collect(Collectors.toList());
     }
 }

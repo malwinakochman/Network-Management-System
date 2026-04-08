@@ -23,16 +23,6 @@ public class DeviceController {
     private final TopologyService topologyService;
     private final Map<Long, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
 
-    @GetMapping
-    public List<Device> getAllDevices() {
-        return new ArrayList<>(topologyService.getDevices().values());
-    }
-
-    @GetMapping("/{id}/connections")
-    public Set<Long> getDeviceConnections(@PathVariable Long id) {
-        return topologyService.getConnections().getOrDefault(id, new HashSet<>());
-    }
-
     @PatchMapping("/{id}")
     public DeviceResponse updateDevice(@PathVariable Long id, @RequestBody DeviceRequest request) {
         Map<Long, Set<Long>> beforeState = new HashMap<>();
@@ -80,6 +70,16 @@ public class DeviceController {
                 }
             }
         }
+    }
+
+    @GetMapping
+    public List<DeviceResponse> getAllDevices() {
+        return new ArrayList<>(topologyService.getDevices());
+    }
+
+    @GetMapping("/{id}/connections")
+    public Set<Long> getDeviceConnections(@PathVariable Long id) {
+        return topologyService.getConnectionsForDevice(id);
     }
 
     private void emitReachabilityChanges(Map<Long, Set<Long>> beforeState) {
