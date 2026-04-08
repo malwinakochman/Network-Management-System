@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Management System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+
+    <style>
+        body {
+            background: #0f0f1e;
+            color: #e0e0e0;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #network {
+            height: 100vh;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        }
+
+        .sidebar {
+            height: 100vh;
+            background: #1a1a2e;
+            border-left: 1px solid #2d2d44;
+            overflow-y: auto;
+        }
+
+        .bg-dark-custom {
+            background: #252540 !important;
+        }
+
+        .text-muted-custom {
+            color: #a0a0a0 !important;
+        }
+
+        .badge-active {
+            background: rgba(74, 222, 128, 0.2);
+            color: #4ade80;
+            border: 1px solid #4ade80;
+        }
+
+        .badge-inactive {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+            border: 1px solid #ef4444;
+        }
+
+        .event-item {
+            font-size: 0.85rem;
+            padding: 0.5rem;
+            margin: 0.25rem 0;
+            border-left: 3px solid #aa93cc;
+        }
+
+        .event-item.initial { border-left-color: #4ade80; color: #4ade80; }
+        .event-item.added { border-left-color: #4ade80; color: #4ade80; }
+        .event-item.removed { border-left-color: #ef4444; color: #ef4444; }
+
+        .device-item {
+            padding: 0.75rem;
+            margin: 0.5rem 0;
+            background: #252540;
+            border-radius: 6px;
+            border: 2px solid transparent;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .device-item:hover {
+            background: #2d2d50;
+        }
+
+        .device-item.selected {
+            border-color: #aa93cc;
+            background: #2d2d50;
+            box-shadow: 0 0 10px rgba(118, 75, 162, 0.3);
+        }
+
+        .bg-primary {
+            background-color: #9364d9 !important;
+        }
+
+        .text-primary {
+            color: #9364d9 !important;
+        }
+
+        .form-check-input:checked {
+            background-color: #4ade80;
+            border-color: #4ade80;
+        }
+    </style>
+</head>
+<body>
+<div class="container-fluid h-100">
+    <div class="row h-100">
+        <div class="col-md-8 col-lg-9 p-0">
+            <div id="network"></div>
+        </div>
+
+        <div class="col-md-4 col-lg-3 sidebar">
+            <div class="bg-primary text-white p-3">
+                <h5 class="mb-0">Network Management System</h5>
+            </div>
+            <div class="p-3 border-bottom border-secondary">
+                <div class="row g-2 mb-3">
+                    <div class="col-6">
+                        <div class="bg-dark-custom p-2 rounded text-center">
+                            <div class="h5 text-primary mb-0" id="totalDevices">0</div>
+                            <small class="text-muted-custom">DEVICES</small>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="bg-dark-custom p-2 rounded text-center">
+                            <div class="h5 text-success mb-0" id="activeDevices">0</div>
+                            <small class="text-muted-custom">ACTIVE</small>
+                        </div>
+                    </div>
+                </div>
+                
+                <button id="deselectBtn" class="btn btn-outline-secondary btn-sm w-100 mb-3" onclick="deselectDevice()" style="display: none;">
+                    ✕ Clear Selection
+                </button>
+
+                <div id="devicesList" style="max-height: 350px; overflow-y: auto;">
+                    <div class="text-center text-muted-custom py-3 small">
+                        Loading devices...
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-3 border-bottom border-secondary">
+                <h6 class="text-primary text-uppercase small mb-3">Reachable Devices</h6>
+                <div id="reachableList" class="bg-dark-custom rounded p-2" style="max-height: 200px; overflow-y: auto;">
+                    <div class="text-center text-muted-custom py-3 small">
+                        Select a device
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-3">
+                <h6 class="text-primary text-uppercase small mb-3">Event Log</h6>
+                <div id="eventLog" class="bg-dark-custom rounded p-2" style="max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 0.85rem;">
+                    <div class="text-center text-muted-custom py-3 small">
+                        No events yet
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let devices = [];
+    let connections = [];
+    let selectedDevice = null;
+    let network = null;
+    let eventSource = null;
+    let reachableDevicesSet = new Set();
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        await loadDevices();
+        initNetwork();
+        updateNetwork();
+    });
+
+    async function loadDevices() {
+        try {
+            const devicesResponse = await fetch('/devices');
+            const devicesMap = await devicesResponse.json();
+
+            devices = Object.entries(devicesMap).map(([id, data]) => {
+                const deviceName = typeof data === 'object' ? (data.name || data.deviceName || 'Unknown') : data;
+                const isActive = typeof data === 'object' ? (data.active !== undefined ? data.active : true) : true;
+
+                return {
+                    id: parseInt(id),
+                    name: String(deviceName),
+                    active: isActive
+                };
+            });
+
+            const seenConnections = new Set();
+
+            for (const device of devices) {
+                const connectionsResponse = await fetch(`/devices/${device.id}/connections`);
+                const deviceConnections = await connectionsResponse.json();
+
+                for (const connectedId of deviceConnections) {
+                    const connKey = device.id < connectedId
+                        ? `${device.id}-${connectedId}`
+                        : `${connectedId}-${device.id}`;
+
+                    if (!seenConnections.has(connKey)) {
+                        seenConnections.add(connKey);
+                        connections.push({
+                            from: device.id,
+                            to: connectedId
+                        });
+                    }
+                }
+            }
+
+            updateStats();
+            updateDevicesList();
+
+        } catch (error) {
+            console.error('Error loading devices:', error);
+        }
+    }
+
+    function updateDevicesList() {
+        const container = document.getElementById('devicesList');
+
+        if (devices.length === 0) {
+            container.innerHTML = '<div class="text-center text-muted-custom py-3 small">No devices</div>';
+            return;
+        }
+
+        const sortedDevices = [...devices].sort((a, b) => a.name.localeCompare(b.name));
+
+        const html = sortedDevices.map(device => {
+            const isSelected = selectedDevice && selectedDevice.id === device.id;
+            const selectedClass = isSelected ? 'selected' : '';
+
+            return `
+                    <div class="device-item ${selectedClass}" onclick="selectDeviceFromList(${device.id})">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="fw-bold">${device.name}</div>
+                                <small class="text-muted-custom">ID: ${device.id}</small>
+                            </div>
+                            <div class="form-check form-switch mb-0">
+                                <input
+                                    class="form-check-input"
+                                    type="checkbox"
+                                    role="switch"
+                                    id="switch-${device.id}"
+                                    ${device.active ? 'checked' : ''}
+                                    onclick="event.stopPropagation(); toggleDeviceById(${device.id})"
+                                >
+                            </div>
+                        </div>
+                    </div>
+                `;
+        }).join('');
+
+        container.innerHTML = html;
+    }
+
+    function selectDeviceFromList(deviceId) {
+        if (selectedDevice && selectedDevice.id === deviceId) {
+            console.log('Deselecting device');
+            deselectDevice();
+            return;
+        }
+
+        const device = devices.find(d => d.id === deviceId);
+        console.log('Found device:', device);
+        if (device) {
+            selectDevice(device);
+        }
+    }
+
+    function deselectDevice() {
+        selectedDevice = null;
+        reachableDevicesSet.clear();
+
+        if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+        }
+
+        document.getElementById('reachableList').innerHTML = '<div class="text-center text-muted-custom py-3 small">Select a device</div>';
+        document.getElementById('eventLog').innerHTML = '<div class="text-center text-muted-custom py-3 small">No events yet</div>';
+
+        updateDevicesList();
+        updateNetwork();
+    }
+
+    async function toggleDeviceById(deviceId) {
+        const device = devices.find(d => d.id === deviceId);
+        if (!device) return;
+
+        try {
+            const response = await fetch(`/devices/${deviceId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: device.name,
+                    active: !device.active
+                })
+            });
+
+            const updated = await response.json();
+
+            device.active = updated.active;
+            const deviceIndex = devices.findIndex(d => d.id === deviceId);
+            if (deviceIndex !== -1) {
+                devices[deviceIndex].active = updated.active;
+            }
+
+            if (selectedDevice && selectedDevice.id === deviceId) {
+                selectedDevice.active = updated.active;
+            }
+
+            updateDevicesList();
+            updateNetwork();
+            updateStats();
+
+        } catch (error) {
+            console.error('Error toggling device:', error);
+        }
+    }
+
+    function initNetwork() {
+        const container = document.getElementById('network');
+
+        const nodes = new vis.DataSet(
+            devices.map(device => ({
+                id: device.id,
+                label: device.name,
+                title: `${device.name}\nID: ${device.id}\n${device.active ? 'Active' : 'Inactive'}`,
+                color: device.active ? '#4ade80' : '#ef4444',
+                font: {
+                    color: '#ffffff',
+                    size: 16,
+                    face: 'Arial',
+                    bold: true
+                }
+            }))
+        );
+
+        const edges = new vis.DataSet(
+            connections.map((conn, index) => {
+                const fromDevice = devices.find(d => d.id === conn.from);
+                const toDevice = devices.find(d => d.id === conn.to);
+                const bothActive = fromDevice?.active && toDevice?.active;
+
+                return {
+                    id: index,
+                    from: conn.from,
+                    to: conn.to,
+                    color: {
+                        color: bothActive ? '#4ade80' : '#666666',
+                        opacity: bothActive ? 0.8 : 0.3
+                    },
+                    arrows: {
+                        to: { enabled: true, scaleFactor: 0.5 },
+                        from: { enabled: true, scaleFactor: 0.5 }
+                    },
+                    width: 2
+                };
+            })
+        );
+
+        const data = { nodes, edges };
+
+        const options = {
+            physics: {
+                enabled: true,
+                barnesHut: {
+                    gravitationalConstant: -10000,
+                    springLength: 300,
+                    springConstant: 0.01
+                },
+                stabilization: { iterations: 250 }
+            },
+            nodes: {
+                shape: 'dot',
+                size: 30,
+                borderWidth: 2,
+                borderWidthSelected: 4,
+                shadow: true
+            },
+            edges: {
+                smooth: { type: 'continuous' },
+                shadow: true,
+                hoverWidth: 0,
+                selectionWidth: 0
+            },
+            interaction: {
+                hover: true,
+                tooltipDelay: 100,
+                dragNodes: true,
+                dragView: true,
+                zoomView: true,
+                selectConnectedEdges: false,
+                hoverConnectedEdges: false
+            }
+        };
+
+        network = new vis.Network(container, data, options);
+
+        network.on('click', (params) => {
+            if (params.nodes.length > 0) {
+                const deviceId = params.nodes[0];
+                const device = devices.find(d => d.id === deviceId);
+                selectDevice(device);
+            }
+        });
+    }
+
+    function updateNetwork() {
+        if (!network) return;
+
+        console.log('updateNetwork called, selectedDevice:', selectedDevice, 'reachableSet:', Array.from(reachableDevicesSet));
+
+        const nodes = network.body.data.nodes;
+        const edges = network.body.data.edges;
+
+        devices.forEach(device => {
+            let color;
+
+            if (!device.active) {
+                color = '#ef4444';
+            } else if (selectedDevice) {
+                if (selectedDevice.id === device.id) {
+                    color = '#aa93cc';
+                } else if (reachableDevicesSet.has(device.id)) {
+                    color = '#4ade80';
+                    console.log(`Device ${device.name} (${device.id}) is REACHABLE - color: ${color}`);
+                } else {
+                    color = '#666666';
+                }
+            } else {
+                color = '#4ade80';
+            }
+
+            nodes.update({ id: device.id, color: color });
+        });
+
+        connections.forEach((conn, index) => {
+            const fromDevice = devices.find(d => d.id === conn.from);
+            const toDevice = devices.find(d => d.id === conn.to);
+            
+            let edgeColor;
+            let edgeOpacity;
+            
+            const bothActive = fromDevice?.active && toDevice?.active;
+            
+            if (!bothActive) {
+                edgeColor = '#666666';
+                edgeOpacity = 0.3;
+            } else if (selectedDevice) {
+                const fromReachable = (selectedDevice.id === conn.from) || reachableDevicesSet.has(conn.from);
+                const toReachable = (selectedDevice.id === conn.to) || reachableDevicesSet.has(conn.to);
+                
+                if (fromReachable && toReachable) {
+                    edgeColor = '#4ade80';
+                    edgeOpacity = 0.8;
+                } else {
+                    edgeColor = '#666666';
+                    edgeOpacity = 0.3;
+                }
+            } else {
+                edgeColor = '#4ade80';
+                edgeOpacity = 0.8;
+            }
+            
+            edges.update({
+                id: index,
+                color: {
+                    color: edgeColor,
+                    opacity: edgeOpacity
+                }
+            });
+        });
+    }
+
+    function selectDevice(device) {
+        console.log('selectDevice called with:', device);
+        selectedDevice = device;
+        updateDevicesList();
+        loadReachableDevices();
+        updateNetwork();
+    }
+
+    async function loadReachableDevices() {
+        console.log('loadReachableDevices called, selectedDevice:', selectedDevice);
+        if (!selectedDevice) return;
+
+        const container = document.getElementById('reachableList');
+        container.innerHTML = '<div class="text-center text-muted-custom py-3 small">Loading...</div>';
+
+        if (eventSource) {
+            eventSource.close();
+        }
+
+        try {
+            const url = `/devices/${selectedDevice.id}/reachable-devices`;
+            console.log('Opening SSE connection to:', url);
+            eventSource = new EventSource(url);
+
+            eventSource.onmessage = (event) => {
+                console.log('SSE message received:', event.data);
+                try {
+                    const data = JSON.parse(event.data);
+
+                    if (data.type === 'INITIAL_STATE') {
+                        reachableDevicesSet.clear();
+                        data.deviceIds.forEach(id => reachableDevicesSet.add(id));
+                        logEvent('INITIAL_STATE', data.deviceIds);
+                        console.log('Initial state set, reachable:', Array.from(reachableDevicesSet));
+
+                    } else if (data.type === 'ADDED') {
+                        reachableDevicesSet.add(data.deviceId);
+                        logEvent('ADDED', data.deviceId);
+
+                    } else if (data.type === 'REMOVED') {
+                        reachableDevicesSet.delete(data.deviceId);
+                        logEvent('REMOVED', data.deviceId);
+                    }
+
+                    displayReachableDevices(Array.from(reachableDevicesSet));
+                    updateNetwork();
+                } catch (e) {
+                    console.error('Error parsing SSE data:', e);
+                }
+            };
+
+            eventSource.addEventListener('update', (event) => {
+                console.log('SSE update event received:', event.data);
+                eventSource.onmessage(event);
+            });
+
+            eventSource.onerror = (error) => {
+                console.error('SSE error:', error);
+                console.log('SSE readyState:', eventSource.readyState);
+                container.innerHTML = '<div class="text-center text-danger py-3 small">Connection error</div>';
+                eventSource.close();
+            };
+
+            eventSource.onopen = () => {
+                console.log('SSE connection opened successfully');
+            };
+
+        } catch (error) {
+            console.error('Error in loadReachableDevices:', error);
+            container.innerHTML = `<div class="text-center text-danger py-3 small">${error.message}</div>`;
+        }
+    }
+
+    function displayReachableDevices(deviceIds) {
+        const container = document.getElementById('reachableList');
+
+        if (deviceIds.length === 0) {
+            container.innerHTML = '<div class="text-center text-muted-custom py-3 small">No reachable devices</div>';
+            return;
+        }
+
+        const html = deviceIds.map(id => {
+            const device = devices.find(d => d.id === id);
+            return `<div class="small text-success mb-1">• ${device?.name || 'Unknown'} (ID: ${id})</div>`;
+        }).join('');
+
+        container.innerHTML = html;
+    }
+
+    function logEvent(type, data) {
+        const eventLog = document.getElementById('eventLog');
+
+        if (eventLog.querySelector('.text-muted-custom')) {
+            eventLog.innerHTML = '';
+        }
+
+        const timeStr = new Date().toLocaleTimeString();
+
+        let displayData = '';
+        if (type === 'INITIAL_STATE') {
+            displayData = `[${data.length || 0} devices]`;
+        } else if (type === 'ADDED' || type === 'REMOVED') {
+            const dev = devices.find(d => d.id === data);
+            displayData = `ID: ${data} (${dev?.name || '?'})`;
+        }
+
+        const eventDiv = document.createElement('div');
+        eventDiv.className = `event-item bg-dark-custom rounded ${type.toLowerCase()}`;
+        eventDiv.innerHTML = `
+                <div class="d-flex justify-content-between">
+                    <span>${type} ${displayData}</span>
+                    <span style="color: #666; font-size: 0.75rem;">${timeStr}</span>
+                </div>
+            `;
+
+        eventLog.insertBefore(eventDiv, eventLog.firstChild);
+
+        while (eventLog.children.length > 20) {
+            eventLog.removeChild(eventLog.lastChild);
+        }
+    }
+
+    function updateStats() {
+        document.getElementById('totalDevices').textContent = devices.length;
+        document.getElementById('activeDevices').textContent = devices.filter(d => d.active).length;
+    }
+</script>
+</body>
+</html>
