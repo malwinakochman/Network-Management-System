@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import org.example.dto.DeviceResponse;
+import org.example.exception.DeviceNotFoundException;
 import org.example.model.Device;
 import org.example.dto.DeviceRequest;
 import org.springframework.stereotype.Service;
@@ -42,6 +43,9 @@ public class TopologyService {
 
     public Device updateDevice(Long id, DeviceRequest request) {
         Device device = devices.get(id);
+        if (device == null) {
+            throw new DeviceNotFoundException(id);
+        }
         if (request.getName() != null && !request.getName().isEmpty()) {
             device.setName(request.getName());
         }
@@ -50,6 +54,10 @@ public class TopologyService {
     }
 
     public Set<Long> getReachableDevices(Long startDeviceId) {
+        if (!devices.containsKey(startDeviceId)) {
+            throw new DeviceNotFoundException(startDeviceId);
+        }
+        
         Set<Long> reachable = new HashSet<>();
         Set<Long> visited = new HashSet<>();
         Queue<Long> queue = new LinkedList<>();
@@ -75,6 +83,9 @@ public class TopologyService {
     }
 
     public Set<Long> getConnectionsForDevice(Long id) {
+        if (!devices.containsKey(id)) {
+            throw new DeviceNotFoundException(id);
+        }
         return new HashSet<>(connections.getOrDefault(id, Collections.emptySet()));
     }
 
